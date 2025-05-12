@@ -113,12 +113,15 @@ func (w *wndClassEx) unregister() error {
 type notifyIconData struct {
 	Size                       uint32
 	Wnd                        windows.Handle
-	ID, Flags, CallbackMessage uint32
+	ID                         uint32
+	Flags                      uint32
+	CallbackMessage            uint32
 	Icon                       windows.Handle
 	Tip                        [128]uint16
-	State, StateMask           uint32
+	State                      uint32
+	StateMask                  uint32
 	Info                       [256]uint16
-	Timeout, Version           uint32
+	TimeoutOrVersion           uint32
 	InfoTitle                  [64]uint16
 	InfoFlags                  uint32
 	GuidItem                   windows.GUID
@@ -126,29 +129,38 @@ type notifyIconData struct {
 }
 
 func (nid *notifyIconData) add() error {
-    const NIM_ADD = 0x00000000
-    const NIM_SETVERSION = 0x00000004
-    
-    // 首先添加图标
-    res, _, err := pShellNotifyIcon.Call(
-        uintptr(NIM_ADD),
-        uintptr(unsafe.Pointer(nid)),
-    )
-    if res == 0 {
-        return err
-    }
-    
-    // 设置版本
-    res, _, err = pShellNotifyIcon.Call(
-        uintptr(NIM_SETVERSION),
-        uintptr(unsafe.Pointer(nid)),
-    )
-    if res == 0 {
-        return err
-    }
-    
-    return nil
+	const (
+		NIM_ADD = 0x00000000
+		NIM_SETVERSION = 0x00000004
+		NOTIFYICON_VERSION_4 = 4
+	)
+
+	// 添加托盘图标
+	res, _, err := pShellNotifyIcon.Call(
+		uintptr(NIM_ADD),
+		uintptr(unsafe.Pointer(nid)),
+	)
+	if res == 0 {
+		return err
+	}
+
+	// 设置版本为 4 (Windows Vista+)
+	versionData := notifyIconData{
+		Size:             uint32(unsafe.Sizeof(notifyIconData{})),
+		Wnd:              nid.Wnd,
+		ID:               nid.ID,
+		TimeoutOrVersion: NOTIFYICON_VERSION_4,
+	}
+
+	res, _, err = pShellNotifyIcon.Call(
+		uintptr(NIM_SETVERSION),
+		uintptr(unsafe.Pointer(&versionData)),
+	)
+	
+	// 即使设置版本失败也不影响基本功能
+	return nil
 }
+
 
 func (nid *notifyIconData) modify() error {
 	const NIM_MODIFY = 0x00000001
@@ -410,6 +422,8 @@ func (t *winTray) initInstance() error {
 		CS_VREDRAW = 0x0001
 	)
 	const NIF_MESSAGE = 0x00000001
+	const NIF_ICON = 0x00000002
+	const NIF_TIP = 0x00000004
 
 	// https://msdn.microsoft.com/en-us/library/windows/desktop/ms644931(v=vs.85).aspx
 	const WM_USER = 0x0400
@@ -506,16 +520,22 @@ func (t *winTray) initInstance() error {
 		uintptr(t.window),
 	)
 
-    t.muNID.Lock()
-    defer t.muNID.Unlock()
-    t.nid = &notifyIconData{
-        Wnd:             windows.Handle(t.window),
-        ID:              100,
-        Flags:           NIF_MESSAGE,
-        CallbackMessage: t.wmSystrayMessage,
-        Version:         4, // 添加 Version 字段，支持 Windows Vista 及以上版本
-    }
-    t.nid.Size = uint32(unsafe.Sizeof(*t.nid))
+	t.muNID.Lock()
+	defer t.muNID.Unlock()
+	
+	t.nid = &notifyIconData{
+		Wnd:              windows.Handle(t.window),
+		ID:               100,
+		Flags:            NIF_MESSAGE | NIF_ICON | NIF_TIP,
+		CallbackMessage:  t.wmSystrayMessage,
+		Icon:             t.icon,
+		TimeoutOrVersion: 4, // 设置为 NOTIFYICON_VERSION_4
+	}
+	t.nid.Size = uint32(unsafe.Sizeof(*t.nid))
+
+	tooltip := "Systray Application"
+	tooltipUTF16, _ := windows.UTF16FromString(tooltip)
+	copy(t.nid.Tip[:], tooltipUTF16)
 
 	return t.nid.add()
 }
@@ -1113,52 +1133,59 @@ func resetMenu() {
 }
 
 func (t *winTray) showNotification(title, message string) error {
-    if !t.isReady() {
-        return ErrTrayNotReadyYet
-    }
+	if !t.isReady() {
+		return ErrTrayNotReadyYet
+	}
 
-    const NIF_INFO = 0x00000010
-    const NIIF_INFO = 0x00000001
-    const NOTIFYICON_VERSION_4 = 4
+	const (
+		NIM_MODIFY = 0x00000001
+		NIF_INFO   = 0x00000010
+		NIIF_INFO  = 0x00000001
+	)
 
-    wTitle, err := windows.UTF16FromString(title)
-    if err != nil {
-        return err
-    }
+	titleUTF16, err := windows.UTF16FromString(title)
+	if err != nil {
+		return err
+	}
 
-    wMessage, err := windows.UTF16FromString(message)
-    if err != nil {
-        return err
-    }
+	messageUTF16, err := windows.UTF16FromString(message)
+	if err != nil {
+		return err
+	}
 
-    t.muNID.Lock()
-    defer t.muNID.Unlock()
-    
-    // 清空之前的信息
-    for i := range t.nid.InfoTitle {
-        t.nid.InfoTitle[i] = 0
-    }
-    for i := range t.nid.Info {
-        t.nid.Info[i] = 0
-    }
-    
-    t.nid.Flags |= NIF_INFO
-    t.nid.InfoFlags = NIIF_INFO
-    t.nid.Version = NOTIFYICON_VERSION_4
-    t.nid.Timeout = 10000 // 10秒超时
-    
-    // 复制标题和消息
-    copy(t.nid.InfoTitle[:], wTitle)
-    copy(t.nid.Info[:], wMessage)
-    
-    // 发送通知
-    err = t.nid.modify()
-    
-    return err
+	t.muNID.Lock()
+	defer t.muNID.Unlock()
+
+	// 创建通知专用的 notifyIconData
+	notifyData := notifyIconData{
+		Size:             uint32(unsafe.Sizeof(notifyIconData{})),
+		Wnd:              t.nid.Wnd,
+		ID:               t.nid.ID,
+		Flags:            NIF_INFO,
+		InfoFlags:        NIIF_INFO,
+		TimeoutOrVersion: 10000, // 10秒超时
+	}
+
+	// 清空并设置通知内容
+	copy(notifyData.InfoTitle[:], titleUTF16)
+	copy(notifyData.Info[:], messageUTF16)
+
+	// 发送通知
+	res, _, err := pShellNotifyIcon.Call(
+		uintptr(NIM_MODIFY),
+		uintptr(unsafe.Pointer(&notifyData)),
+	)
+
+	if res == 0 {
+		return err
+	}
+
+	return nil
 }
 
+// 5. 修改公共接口函数
 func showNotification(title, message string) error {
-    return wt.showNotification(title, message)
+	return wt.showNotification(title, message)
 }
 
 func GetWindowHandle() windows.Handle {
