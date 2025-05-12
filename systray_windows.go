@@ -1101,3 +1101,47 @@ func showMenuItem(item *MenuItem) {
 func resetMenu() {
 	wt.createMenu()
 }
+
+// showNotification displays a balloon notification from the tray icon
+// Only works on Windows
+func (t *winTray) showNotification(title, message string) error {
+    if !t.isReady() {
+        return ErrTrayNotReadyYet
+    }
+
+    const NIF_INFO = 0x00000010
+    const NIIF_INFO = 0x00000001
+
+    wTitle, err := windows.UTF16FromString(title)
+    if err != nil {
+        return err
+    }
+
+    wMessage, err := windows.UTF16FromString(message)
+    if err != nil {
+        return err
+    }
+
+    t.muNID.Lock()
+    defer t.muNID.Unlock()
+
+    t.nid.Flags |= NIF_INFO
+    t.nid.InfoFlags = NIIF_INFO
+    copy(t.nid.InfoTitle[:], wTitle)
+    copy(t.nid.Info[:], wMessage)
+    
+    return t.nid.modify()
+}
+
+func showNotification(title, message string) error {
+    return wt.showNotification(title, message)
+}
+
+// GetWindowHandle returns the HWND of the tray window
+// Only works on Windows
+func GetWindowHandle() windows.Handle {
+    if !wt.isReady() {
+        return 0
+    }
+    return wt.window
+}

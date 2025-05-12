@@ -455,3 +455,7 @@ func argbForImage(img image.Image) []byte {
 	}
 	return data
 }
+
+func showNotification(title, message string) error {
+    return nil
+}

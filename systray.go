@@ -281,3 +281,9 @@ func systrayMenuItemSelected(id uint32) {
 		item.click()
 	}
 }
+
+// ShowNotification displays a balloon notification from the tray icon
+// Only works on Windows and possibly some Linux DEs
+func ShowNotification(title, message string) error {
+    return showNotification(title, message)
+}

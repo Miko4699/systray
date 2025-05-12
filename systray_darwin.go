@@ -242,3 +242,7 @@ func systray_on_rclick() {
 		C.show_menu()
 	}
 }
+
+func showNotification(title, message string) error {
+    return nil
+}

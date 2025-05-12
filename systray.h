@@ -25,3 +25,4 @@ void show_menu();
 void set_menu_nil();
 void quit();
 void enable_on_click();
+void show_notification(char* title, char* message);
