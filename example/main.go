@@ -2,32 +2,28 @@ package main
 
 import (
 	"fmt"
-	"github.com/energye/systray"
-	"github.com/energye/systray/icon"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
-)
 
+	"github.com/Miko4699/systray"
+	"github.com/Miko4699/systray/icon"
+)
 func main() {
 	MainRun()
 }
-
 var start func()
 var end func()
-
 func MainRun() {
 	onExit := func() {
 		now := time.Now()
 		fmt.Println("Exit at", now.String())
 	}
-
 	systray.Run(onReady, onExit)
 }
-
 func addQuitItem() {
 	mQuit := systray.AddMenuItem("Quit", "Quit the whole app")
 	mQuit.Enable()
@@ -39,7 +35,6 @@ func addQuitItem() {
 		fmt.Println("Finished quitting")
 	})
 }
-
 func onReady() {
 	fmt.Println("systray.onReady")
 	systray.SetTemplateIcon(icon.Data, icon.Data)
@@ -65,14 +60,23 @@ func onReady() {
 	systray.CreateMenu()
 	addQuitItem()
 	systray.SetTemplateIcon(icon.Data, icon.Data)
+	
+	// 添加显示通知的菜单项
+	mNotify := systray.AddMenuItem("Show Notification", "Display a system tray notification")
+	mNotify.Click(func() {
+		fmt.Println("Showing notification")
+		err := systray.ShowNotification("Systray Notification", "这是一条来自系统托盘的通知!")
+		if err != nil {
+			fmt.Println("Failed to show notification:", err)
+		}
+	})
+	
 	mChange := systray.AddMenuItem("Change Me", "Change Me")
 	mChecked := systray.AddMenuItemCheckbox("Checked", "Check Me", true)
 	mEnabled := systray.AddMenuItem("Enabled", "Enabled")
 	// Sets the icon of a menu item. Only available on Mac.
 	mEnabled.SetTemplateIcon(icon.Data, icon.Data)
-
 	systray.AddMenuItem("Ignored", "Ignored")
-
 	subMenuTop := systray.AddMenuItem("SubMenuTop", "SubMenu Test (top)")
 	subMenuMiddle := subMenuTop.AddSubMenuItem("SubMenuMiddle", "SubMenu Test (middle)")
 	subMenuBottom := subMenuMiddle.AddSubMenuItemCheckbox("SubMenuBottom - Toggle Panic!", "SubMenu Test (bottom) - Hide/Show Panic!", false)
@@ -97,36 +101,45 @@ func onReady() {
 		}
 	}
 	mReset := systray.AddMenuItem("Reset", "Reset all items")
-
 	mChange.Click(func() {
 		mChange.SetTitle("I've Changed")
+		// 在更改标题时显示通知
+		systray.ShowNotification("Title Changed", "菜单项的标题已更改!")
 	})
 	mChecked.Click(func() {
 		if mChecked.Checked() {
 			mChecked.Uncheck()
 			mChecked.SetTitle("Unchecked")
+			systray.ShowNotification("Checkbox Changed", "复选框已取消选中!")
 		} else {
 			mChecked.Check()
 			mChecked.SetTitle("Checked")
+			systray.ShowNotification("Checkbox Changed", "复选框已选中!")
 		}
 	})
 	mEnabled.Click(func() {
 		mEnabled.SetTitle("Disabled")
 		fmt.Println("mEnabled.Disabled()", mEnabled.Disabled())
 		mEnabled.Disable()
+		systray.ShowNotification("Item Disabled", "菜单项已禁用!")
 	})
 	subMenuBottom2.Click(func() {
+		systray.ShowNotification("Warning", "即将触发 panic!")
+		time.Sleep(time.Second)
 		panic("panic button pressed")
 	})
 	subMenuBottom.Click(func() {
 		toggle()
+		systray.ShowNotification("Toggle Changed", "切换状态已更改!")
 	})
 	mReset.Click(func() {
 		systray.ResetMenu()
 		addQuitItem()
+		systray.ShowNotification("Menu Reset", "菜单已重置!")
 	})
 	mToggle.Click(func() {
 		toggle()
+		systray.ShowNotification("Items Toggled", "菜单项已切换显示状态!")
 	})
 	// tray icon switch
 	go func() {

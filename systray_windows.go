@@ -7,7 +7,6 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -127,15 +126,28 @@ type notifyIconData struct {
 }
 
 func (nid *notifyIconData) add() error {
-	const NIM_ADD = 0x00000000
-	res, _, err := pShellNotifyIcon.Call(
-		uintptr(NIM_ADD),
-		uintptr(unsafe.Pointer(nid)),
-	)
-	if res == 0 {
-		return err
-	}
-	return nil
+    const NIM_ADD = 0x00000000
+    const NIM_SETVERSION = 0x00000004
+    
+    // 首先添加图标
+    res, _, err := pShellNotifyIcon.Call(
+        uintptr(NIM_ADD),
+        uintptr(unsafe.Pointer(nid)),
+    )
+    if res == 0 {
+        return err
+    }
+    
+    // 设置版本
+    res, _, err = pShellNotifyIcon.Call(
+        uintptr(NIM_SETVERSION),
+        uintptr(unsafe.Pointer(nid)),
+    )
+    if res == 0 {
+        return err
+    }
+    
+    return nil
 }
 
 func (nid *notifyIconData) modify() error {
@@ -494,15 +506,16 @@ func (t *winTray) initInstance() error {
 		uintptr(t.window),
 	)
 
-	t.muNID.Lock()
-	defer t.muNID.Unlock()
-	t.nid = &notifyIconData{
-		Wnd:             windows.Handle(t.window),
-		ID:              100,
-		Flags:           NIF_MESSAGE,
-		CallbackMessage: t.wmSystrayMessage,
-	}
-	t.nid.Size = uint32(unsafe.Sizeof(*t.nid))
+    t.muNID.Lock()
+    defer t.muNID.Unlock()
+    t.nid = &notifyIconData{
+        Wnd:             windows.Handle(t.window),
+        ID:              100,
+        Flags:           NIF_MESSAGE,
+        CallbackMessage: t.wmSystrayMessage,
+        Version:         4, // 添加 Version 字段，支持 Windows Vista 及以上版本
+    }
+    t.nid.Size = uint32(unsafe.Sizeof(*t.nid))
 
 	return t.nid.add()
 }
@@ -968,16 +981,13 @@ func iconBytesToFilePath(iconBytes []byte) (string, error) {
 	iconFilePath := filepath.Join(os.TempDir(), "systray_temp_icon_"+dataHash)
 
 	if _, err := os.Stat(iconFilePath); os.IsNotExist(err) {
-		if err := ioutil.WriteFile(iconFilePath, iconBytes, 0644); err != nil {
+		if err := os.WriteFile(iconFilePath, iconBytes, 0644); err != nil {
 			return "", err
 		}
 	}
 	return iconFilePath, nil
 }
 
-// SetIcon sets the systray icon.
-// iconBytes should be the content of .ico for windows and .ico/.jpg/.png
-// for other platforms.
 func SetIcon(iconBytes []byte) {
 	iconFilePath, err := iconBytesToFilePath(iconBytes)
 	if err != nil {
@@ -1109,6 +1119,7 @@ func (t *winTray) showNotification(title, message string) error {
 
     const NIF_INFO = 0x00000010
     const NIIF_INFO = 0x00000001
+    const NOTIFYICON_VERSION_4 = 4
 
     wTitle, err := windows.UTF16FromString(title)
     if err != nil {
@@ -1122,17 +1133,26 @@ func (t *winTray) showNotification(title, message string) error {
 
     t.muNID.Lock()
     defer t.muNID.Unlock()
-
-    originalFlags := t.nid.Flags
+    
+    // 清空之前的信息
+    for i := range t.nid.InfoTitle {
+        t.nid.InfoTitle[i] = 0
+    }
+    for i := range t.nid.Info {
+        t.nid.Info[i] = 0
+    }
     
     t.nid.Flags |= NIF_INFO
     t.nid.InfoFlags = NIIF_INFO
+    t.nid.Version = NOTIFYICON_VERSION_4
+    t.nid.Timeout = 10000 // 10秒超时
+    
+    // 复制标题和消息
     copy(t.nid.InfoTitle[:], wTitle)
     copy(t.nid.Info[:], wMessage)
     
+    // 发送通知
     err = t.nid.modify()
-    
-    t.nid.Flags = originalFlags
     
     return err
 }
